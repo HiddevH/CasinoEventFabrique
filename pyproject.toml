@@ -29,7 +29,6 @@ adx = [
 ]
 
 [project.scripts]
-casinoeventfabrique-replay = "casinoeventfabrique.replay_cli:main"
 casinoeventfabrique-casino = "casinoeventfabrique.casino_cli:main"
 
 [tool.black]
