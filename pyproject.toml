@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "azure-eventhub>=5.11.0",
+    "azure-identity>=1.12.0",
 ]
 
 [project.optional-dependencies]

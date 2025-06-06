@@ -25,34 +25,49 @@ def setup_logging(verbose: bool = False) -> None:
     logging.basicConfig(level=log_level, format=log_format)
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-    
-    Returns:
-        Parsed arguments
-    """
+def parse_args():
+    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Simulate casino players and generate events"
+        description="Run casino player simulation"
     )
     
     # Output options
-    output_group = parser.add_mutually_exclusive_group(required=True)
-    output_group.add_argument(
-        "--output-file",
-        "-o",
-        help="Path to the output file for events (JSON format)"
+    parser.add_argument(
+        "--output-file", "-o",
+        type=str,
+        help="Path to output file for events (JSON format)"
     )
-    output_group.add_argument(
-        "--connection-string",
-        "-c",
+    
+    # Event Hub connection options
+    parser.add_argument(
+        "--connection-string", "-c",
+        type=str,
         help="Azure Event Hub connection string"
     )
     
-    # Azure Event Hub options
     parser.add_argument(
-        "--eventhub-name",
-        "-n",
-        help="Name of the Azure Event Hub (required with --connection-string)"
+        "--eventhub-name", "-n",
+        type=str,
+        help="Name of the Azure Event Hub"
+    )
+    
+    # Identity-based authentication options
+    parser.add_argument(
+        "--eventhub-namespace",
+        type=str,
+        help="Event Hub fully qualified namespace (e.g., 'mynamespace.servicebus.windows.net')"
+    )
+    
+    parser.add_argument(
+        "--use-managed-identity",
+        action="store_true",
+        help="Use Azure Managed Identity for authentication"
+    )
+    
+    parser.add_argument(
+        "--use-default-credential",
+        action="store_true",
+        help="Use Azure DefaultAzureCredential for authentication"
     )
     
     # Player distribution options
@@ -125,40 +140,85 @@ def parse_args() -> argparse.Namespace:
     # Parse arguments
     args = parser.parse_args()
     
-    # Validate Event Hub arguments
-    if args.connection_string and not args.eventhub_name:
-        parser.error("--eventhub-name is required when using --connection-string")
-    
     return args
 
 
-def main() -> int:
-    """Main entry point for the CLI.
-    
-    Returns:
-        Exit code
-    """
+def main():
+    """Main entry point for the casino CLI."""
     args = parse_args()
-    setup_logging(args.verbose)
-    logger = logging.getLogger(__name__)
     
-    try:
-        # Create publisher
-        publisher = None
-        if args.connection_string:
-            logger.info(f"Using Azure Event Hub: {args.eventhub_name}")
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger("casino_cli")
+    
+    # Determine the publisher based on arguments
+    publisher = None
+    
+    if args.connection_string:
+        # Connection string authentication
+        if not args.eventhub_name:
+            logger.error("--eventhub-name is required when using --connection-string")
+            return 1
+            
+        publisher = EventHubPublisher(
+            connection_string=args.connection_string,
+            eventhub_name=args.eventhub_name
+        )
+        logger.info("Using Event Hub with connection string authentication")
+        
+    elif args.eventhub_namespace and args.eventhub_name:
+        # Identity-based authentication
+        credential = None
+        
+        if args.use_managed_identity:
             try:
-                publisher = EventHubPublisher(
-                    connection_string=args.connection_string,
-                    eventhub_name=args.eventhub_name
-                )
-            except ImportError as e:
-                logger.error(f"Failed to initialize Event Hub publisher: {e}")
+                from azure.identity import ManagedIdentityCredential
+                credential = ManagedIdentityCredential()
+                logger.info("Using Managed Identity credential")
+            except ImportError:
+                logger.error("Azure Identity package not installed. Install with: pip install azure-identity")
+                return 1
+                
+        elif args.use_default_credential:
+            try:
+                from azure.identity import DefaultAzureCredential
+                credential = DefaultAzureCredential()
+                logger.info("Using Default Azure credential")
+            except ImportError:
+                logger.error("Azure Identity package not installed. Install with: pip install azure-identity")
                 return 1
         else:
-            logger.info(f"Using file output: {args.output_file}")
-            publisher = FileEventStore(args.output_file)
+            # Default to DefaultAzureCredential if no specific credential is specified
+            try:
+                from azure.identity import DefaultAzureCredential
+                credential = DefaultAzureCredential()
+                logger.info("Using Default Azure credential (default)")
+            except ImportError:
+                logger.error("Azure Identity package not installed. Install with: pip install azure-identity")
+                return 1
         
+        publisher = EventHubPublisher(
+            eventhub_name=args.eventhub_name,
+            fully_qualified_namespace=args.eventhub_namespace,
+            credential=credential
+        )
+        logger.info("Using Event Hub with identity-based authentication")
+        
+    elif args.output_file:
+        # File output
+        publisher = FileEventStore(args.output_file)
+        logger.info(f"Using file output: {args.output_file}")
+        
+    else:
+        # Default to file output
+        default_file = "casino_events.json"
+        publisher = FileEventStore(default_file)
+        logger.info(f"No publisher specified, using default file output: {default_file}")
+    
+    try:
         # Start time measurement
         start_time = time.time()
         

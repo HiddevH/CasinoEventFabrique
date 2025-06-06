@@ -19,6 +19,12 @@ try:
 except ImportError:
     HAS_EVENTHUB = False
 
+try:
+    from azure.identity import DefaultAzureCredential
+    HAS_IDENTITY = True
+except ImportError:
+    HAS_IDENTITY = False
+
 from .core import Event
 
 
@@ -415,36 +421,83 @@ class CasinoPlayer:
 
 
 class EventHubPublisher:
-    """Publisher for Azure Event Hub."""
+    """Publisher for Azure Event Hub with support for both connection string and identity-based authentication."""
     
     def __init__(
         self,
-        connection_string: str,
         eventhub_name: str,
+        connection_string: Optional[str] = None,
+        fully_qualified_namespace: Optional[str] = None,
+        credential: Optional[Any] = None,
     ):
         """Initialize Event Hub publisher.
         
         Args:
-            connection_string: Azure Event Hub connection string
             eventhub_name: Name of the Event Hub
+            connection_string: Azure Event Hub connection string (optional)
+            fully_qualified_namespace: Event Hub namespace (e.g., 'mynamespace.servicebus.windows.net')
+            credential: Azure credential for identity-based authentication (optional)
+            
+        Note:
+            Either connection_string OR both fully_qualified_namespace and credential must be provided.
         """
         if not HAS_EVENTHUB:
             raise ImportError(
                 "Azure Event Hub package not installed. "
-                "Install with: pip install azure-eventhub"
+                "Install with: pip install azure-eventhub azure-identity"
             )
             
-        self.connection_string = connection_string
         self.eventhub_name = eventhub_name
+        self.connection_string = connection_string
+        self.fully_qualified_namespace = fully_qualified_namespace
+        self.credential = credential
         self.producer = None
         self.logger = logging.getLogger(__name__)
         
+        # Validate authentication parameters
+        if connection_string:
+            if fully_qualified_namespace or credential:
+                self.logger.warning(
+                    "Connection string provided along with identity parameters. "
+                    "Connection string will take precedence."
+                )
+        elif fully_qualified_namespace and credential:
+            # Identity-based authentication
+            pass
+        elif fully_qualified_namespace and not credential:
+            # Try to use default Azure credential
+            try:
+                from azure.identity import DefaultAzureCredential
+                self.credential = DefaultAzureCredential()
+                self.logger.info("Using DefaultAzureCredential for authentication")
+            except ImportError:
+                raise ImportError(
+                    "Azure Identity package not installed. "
+                    "Install with: pip install azure-identity"
+                )
+        else:
+            raise ValueError(
+                "Either connection_string OR fully_qualified_namespace must be provided"
+            )
+        
     def __enter__(self):
         """Context manager entry."""
-        self.producer = EventHubProducerClient.from_connection_string(
-            conn_str=self.connection_string,
-            eventhub_name=self.eventhub_name
-        )
+        if self.connection_string:
+            # Connection string authentication
+            self.producer = EventHubProducerClient.from_connection_string(
+                conn_str=self.connection_string,
+                eventhub_name=self.eventhub_name
+            )
+            self.logger.info("Connected to Event Hub using connection string")
+        else:
+            # Identity-based authentication
+            self.producer = EventHubProducerClient(
+                fully_qualified_namespace=self.fully_qualified_namespace,
+                eventhub_name=self.eventhub_name,
+                credential=self.credential
+            )
+            self.logger.info(f"Connected to Event Hub using identity-based authentication: {self.fully_qualified_namespace}")
+        
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):

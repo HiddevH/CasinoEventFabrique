@@ -47,35 +47,60 @@ uv pip install -e .
 
 ### Command-line Usage
 
-The package provides a command-line tool for casino simulation:
+The package provides a command-line tool for casino simulation with multiple authentication options:
 
+#### Using Connection String (traditional method)
 ```bash
-# Output to a JSON file
-casinoeventfabrique-casino --output-file events/casino_events.json --duration 300
-
-# Output to Azure Event Hub
 casinoeventfabrique-casino --connection-string "YOUR_EVENT_HUB_CONNECTION_STRING" \
-                      --eventhub-name "YOUR_EVENT_HUB_NAME" \
-                      --addict-players 2 \
-                      --fraudster-players 3 \
-                      --duration 3600
+                          --eventhub-name "YOUR_EVENT_HUB_NAME" \
+                          --duration 300
 ```
+
+#### Using Identity-based Authentication (recommended)
+```bash
+# Using Managed Identity (when running on Azure resources)
+casinoeventfabrique-casino --eventhub-namespace "mynamespace.servicebus.windows.net" \
+                          --eventhub-name "YOUR_EVENT_HUB_NAME" \
+                          --use-managed-identity \
+                          --duration 300
+
+# Using Default Azure Credential (tries multiple authentication methods)
+casinoeventfabrique-casino --eventhub-namespace "mynamespace.servicebus.windows.net" \
+                          --eventhub-name "YOUR_EVENT_HUB_NAME" \
+                          --use-default-credential \
+                          --duration 300
+
+# Default behavior (uses DefaultAzureCredential automatically)
+casinoeventfabrique-casino --eventhub-namespace "mynamespace.servicebus.windows.net" \
+                          --eventhub-name "YOUR_EVENT_HUB_NAME" \
+                          --duration 300
+```
+
+#### Output to File
+```bash
+casinoeventfabrique-casino --output-file events/casino_events.json --duration 300
+```
+
+### Authentication Options
+
+- **Connection String**: Traditional method using a connection string with embedded credentials
+- **Managed Identity**: Uses Azure Managed Identity when running on Azure resources (VMs, App Service, etc.)
+- **Default Azure Credential**: Tries multiple authentication methods in order:
+  1. Environment variables
+  2. Managed Identity
+  3. Visual Studio Code
+  4. Azure CLI
+  5. Azure PowerShell
+  6. Interactive browser
 
 ### Options
 
 - `--output-file`, `-o`: Path to the output file for events (JSON format)
 - `--connection-string`, `-c`: Azure Event Hub connection string
-- `--eventhub-name`, `-n`: Name of the Azure Event Hub (required with --connection-string)
-- `--normal-players`: Number of normal players (default: 40)
-- `--high-roller-players`: Number of high-roller players (default: 3)
-- `--occasional-players`: Number of occasional players (default: 4)
-- `--addict-players`: Number of players with addictive behavior (default: 1)
-- `--bonus-hunter-players`: Number of bonus hunter players (default: 1)
-- `--fraudster-players`: Number of fraudulent players (default: 1)
-- `--duration`, `-d`: Duration of simulation in seconds (default: 3600 = 1 hour)
-- `--threads`, `-t`: Number of threads for parallel simulation (default: 50)
-- `--event-delay`: Delay between event batches in seconds (default: 0.05)
-- `--verbose`, `-v`: Enable verbose logging
+- `--eventhub-name`, `-n`: Name of the Azure Event Hub
+- `--eventhub-namespace`: Event Hub fully qualified namespace (e.g., 'mynamespace.servicebus.windows.net')
+- `--use-managed-identity`: Use Azure Managed Identity for authentication
+- `--use-default-credential`: Use Azure DefaultAzureCredential for authentication
 
 ### Player Profiles
 
