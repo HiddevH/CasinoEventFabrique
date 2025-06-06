@@ -9,7 +9,8 @@ from .casino_simulation import (
     PlayerProfileType, 
     PlayerProfile, 
     GameType, 
-    FileEventStore
+    FileEventStore,
+    EventHubPublisher
 )
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "PlayerProfileType",
     "PlayerProfile",
     "GameType",
-    "FileEventStore"
+    "FileEventStore",
+    "EventHubPublisher"
 ]

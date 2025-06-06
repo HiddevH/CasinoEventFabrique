@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple, Union
@@ -36,6 +36,36 @@ class GameType(Enum):
     ROULETTE = "roulette"
     POKER = "poker"
     BACCARAT = "baccarat"
+
+
+class BonusType(Enum):
+    """Types of bonuses."""
+    DEPOSIT_MATCH = "deposit_match"      # Match percentage of deposit
+    FREE_SPINS = "free_spins"           # Free spins on slots
+    CASHBACK = "cashback"               # Percentage of losses back
+    NO_DEPOSIT = "no_deposit"           # Free money with no deposit required
+    RELOAD = "reload"                   # Bonus on subsequent deposits
+
+
+@dataclass
+class Bonus:
+    """Represents an active bonus."""
+    bonus_type: BonusType
+    amount: float = 0.0                 # Bonus amount or number of free spins
+    wagering_requirement: float = 0.0   # Amount that needs to be wagered to clear
+    wagered_amount: float = 0.0         # Amount already wagered towards requirement
+    expires_at: Optional[datetime] = None
+    is_active: bool = True
+    
+    def is_cleared(self) -> bool:
+        """Check if bonus wagering requirement is met."""
+        return self.wagered_amount >= self.wagering_requirement
+    
+    def is_expired(self) -> bool:
+        """Check if bonus has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now() > self.expires_at
 
 
 class PlayerProfileType(Enum):
@@ -72,6 +102,17 @@ class PlayerProfile:
     # Session behavior
     avg_session_length: int = 20  # average number of betting actions per session
     session_length_variance: int = 10  # variance in session length
+    
+    # Bonus behavior
+    bonus_sensitivity: float = 0.1  # probability of responding to bonus offers
+    prefers_deposit_bonuses: bool = False
+    prefers_free_spins: bool = False
+    
+    # Bonus behavior
+    bonus_preference: Optional[BonusType] = None  # Preferred type of bonus
+    min_bonus_amount: float = 0.0  # Minimum bonus amount desired
+    max_bonus_amount: float = 0.0  # Maximum bonus amount desired
+    bonus_frequency: float = 0.0  # Probability of claiming a bonus in a given session
 
 
 # Define default player profiles
@@ -89,7 +130,11 @@ PLAYER_PROFILES = {
         max_bet=10.0,
         play_frequency=0.7,
         avg_session_length=30,
-        session_length_variance=10
+        session_length_variance=10,
+        bonus_preference=BonusType.DEPOSIT_MATCH,
+        min_bonus_amount=10.0,
+        max_bonus_amount=50.0,
+        bonus_frequency=0.2
     ),
     
     PlayerProfileType.HIGH_ROLLER: PlayerProfile(
@@ -105,7 +150,11 @@ PLAYER_PROFILES = {
         max_bet=1000.0,
         play_frequency=0.6,
         avg_session_length=50,
-        session_length_variance=20
+        session_length_variance=20,
+        bonus_preference=BonusType.CASHBACK,
+        min_bonus_amount=50.0,
+        max_bonus_amount=500.0,
+        bonus_frequency=0.3
     ),
     
     PlayerProfileType.OCCASIONAL: PlayerProfile(
@@ -121,7 +170,11 @@ PLAYER_PROFILES = {
         max_bet=5.0,
         play_frequency=0.3,
         avg_session_length=15,
-        session_length_variance=5
+        session_length_variance=5,
+        bonus_preference=BonusType.FREE_SPINS,
+        min_bonus_amount=5.0,
+        max_bonus_amount=20.0,
+        bonus_frequency=0.1
     ),
     
     PlayerProfileType.ADDICT: PlayerProfile(
@@ -137,7 +190,11 @@ PLAYER_PROFILES = {
         max_bet=50.0,
         play_frequency=0.9,  # Very high play frequency
         avg_session_length=100,  # Very long sessions
-        session_length_variance=30
+        session_length_variance=30,
+        bonus_preference=BonusType.NO_DEPOSIT,
+        min_bonus_amount=10.0,
+        max_bonus_amount=100.0,
+        bonus_frequency=0.4
     ),
     
     PlayerProfileType.BONUS_HUNTER: PlayerProfile(
@@ -153,7 +210,11 @@ PLAYER_PROFILES = {
         max_bet=20.0,
         play_frequency=0.8,
         avg_session_length=40,
-        session_length_variance=10
+        session_length_variance=10,
+        bonus_preference=BonusType.RELOAD,
+        min_bonus_amount=5.0,
+        max_bonus_amount=50.0,
+        bonus_frequency=0.25
     ),
     
     PlayerProfileType.FRAUDSTER: PlayerProfile(
@@ -169,7 +230,11 @@ PLAYER_PROFILES = {
         max_bet=10.0,
         play_frequency=0.4,  # Low play frequency
         avg_session_length=10,  # Short sessions
-        session_length_variance=5
+        session_length_variance=5,
+        bonus_preference=BonusType.CASHBACK,
+        min_bonus_amount=10.0,
+        max_bonus_amount=100.0,
+        bonus_frequency=0.5
     )
 }
 
@@ -201,7 +266,8 @@ class CasinoPlayer:
         self.total_losses = 0.0
         self.last_action_timestamp = None
         self.logger = logging.getLogger(f"{__name__}.player.{player_id}")
-        
+        self.active_bonus: Optional[Bonus] = None  # Current active bonus for the player
+    
     def deposit(self) -> Dict[str, Any]:
         """Simulate a deposit.
         
@@ -324,6 +390,72 @@ class CasinoPlayer:
             "profile_type": self.profile.profile_type.value
         }
     
+    def claim_bonus(self) -> Optional[Dict[str, Any]]:
+        """Simulate claiming a bonus.
+        
+        Returns:
+            Bonus event data if successful, None otherwise
+        """
+        # Check if a bonus is already active
+        if self.active_bonus and self.active_bonus.is_active:
+            self.logger.debug(f"Player {self.player_id} already has an active bonus")
+            return None
+        
+        # Determine if bonus should be claimed based on profile preference
+        if self.profile.bonus_preference and random.random() < self.profile.bonus_frequency:
+            bonus_type = self.profile.bonus_preference
+        else:
+            # Randomly select a bonus type
+            bonus_type = random.choice(list(BonusType))
+        
+        # Set bonus amount based on type and profile limits
+        if bonus_type == BonusType.FREE_SPINS:
+            amount = random.randint(5, 50)  # Free spins between 5 and 50
+        else:
+            amount = random.uniform(self.profile.min_bonus_amount, self.profile.max_bonus_amount)
+        
+        amount = round(amount, 2)
+        
+        # Create and activate the bonus
+        self.active_bonus = Bonus(
+            bonus_type=bonus_type,
+            amount=amount,
+            wagering_requirement=amount * 10,  # Example: 10x wagering requirement
+            expires_at=datetime.now() + timedelta(hours=24),  # 24-hour expiration
+            is_active=True
+        )
+        
+        self.logger.debug(f"Player {self.player_id} claimed a bonus: {self.active_bonus}")
+        
+        return {
+            "event_type": "bonus_claim",
+            "timestamp": datetime.now().isoformat(),
+            "player_id": self.player_id,
+            "bonus_type": bonus_type.value,
+            "amount": amount,
+            "balance": self.balance,
+            "profile_type": self.profile.profile_type.value
+        }
+    
+    def deposit_bonus(self) -> Optional[Dict[str, Any]]:
+        """Simulate a deposit that triggers a bonus.
+        
+        Returns:
+            Deposit and bonus event data
+        """
+        # Perform the deposit
+        deposit_event = self.deposit()
+        
+        # Automatically claim a bonus for the deposit
+        bonus_event = self.claim_bonus()
+        
+        # Combine events
+        event_data = deposit_event
+        if bonus_event:
+            event_data.update(bonus_event)
+        
+        return event_data
+    
     def simulate_session(self) -> List[Dict[str, Any]]:
         """Simulate a player session.
         
@@ -357,6 +489,12 @@ class CasinoPlayer:
             # Play a game with some probability
             if random.random() < self.profile.play_frequency:
                 events.append(self.play_game())
+            
+            # Claim a bonus with some probability
+            if random.random() < self.profile.bonus_frequency:
+                bonus_event = self.claim_bonus()
+                if bonus_event:
+                    events.append(bonus_event)
             
             # Small pause between actions
             time.sleep(random.uniform(0.01, 0.1))
@@ -544,35 +682,73 @@ class EventHubPublisher:
             
         try:
             event_batches = {}  # Batches by partition key
+            batch_event_counts = {}  # Track events in each batch to avoid double counting
             sent_count = 0
+            skipped_count = 0
             
             for event_data in events:
                 partition_key = str(event_data.get(partition_key_field, ""))
                 
+                # Create batch for this partition if it doesn't exist
                 if partition_key not in event_batches:
                     event_batches[partition_key] = self.producer.create_batch(partition_key=partition_key)
+                    batch_event_counts[partition_key] = 0
                     
-                event_data_encoded = EventData(body=json.dumps(event_data).encode('utf-8'))
+                # Encode the event data
+                try:
+                    event_json = json.dumps(event_data)
+                    event_data_encoded = EventData(body=event_json.encode('utf-8'))
+                    event_size = len(event_json.encode('utf-8'))
+                except (TypeError, ValueError) as e:
+                    self.logger.warning(f"Failed to encode event data, skipping: {e}")
+                    skipped_count += 1
+                    continue
                 
-                # If we can't add the event to the current batch, send it and create a new one
-                if not event_batches[partition_key].add(event_data_encoded):
-                    self.producer.send_batch(event_batches[partition_key])
-                    sent_count += len(event_batches[partition_key])
+                # Try to add the event to the current batch
+                added_to_batch = event_batches[partition_key].add(event_data_encoded)
+                
+                if added_to_batch:
+                    # Event was successfully added to the batch
+                    batch_event_counts[partition_key] += 1
+                    self.logger.debug(f"Added event to batch for partition {partition_key} (size: {event_size} bytes)")
+                else:
+                    # Current batch is full, send it
+                    batch_size = batch_event_counts[partition_key]
+                    if batch_size > 0:
+                        self.logger.debug(f"Sending full batch for partition {partition_key} ({batch_size} events)")
+                        self.producer.send_batch(event_batches[partition_key])
+                        sent_count += batch_size
                     
                     # Create a new batch for this partition key
                     event_batches[partition_key] = self.producer.create_batch(partition_key=partition_key)
+                    batch_event_counts[partition_key] = 0
                     
                     # Try adding the event to the new batch
-                    if not event_batches[partition_key].add(event_data_encoded):
-                        self.logger.warning(f"Event too large to fit in batch, skipping: {event_data}")
+                    added_to_new_batch = event_batches[partition_key].add(event_data_encoded)
+                    
+                    if added_to_new_batch:
+                        # Event was successfully added to the new batch
+                        batch_event_counts[partition_key] += 1
+                        self.logger.debug(f"Added event to new batch for partition {partition_key} (size: {event_size} bytes)")
+                    else:
+                        # If it still fails on an empty batch, the event is genuinely too large
+                        self.logger.warning(f"Event too large ({event_size} bytes) to fit in empty batch, skipping event for player {event_data.get(partition_key_field, 'unknown')}")
+                        self.logger.debug(f"Skipped event data: {json.dumps(event_data, indent=2)}")
+                        skipped_count += 1
                         continue
             
             # Send any remaining batches
             for partition_key, batch in event_batches.items():
-                if len(batch) > 0:
+                batch_size = batch_event_counts[partition_key]
+                if batch_size > 0:
+                    self.logger.debug(f"Sending final batch for partition {partition_key} ({batch_size} events)")
                     self.producer.send_batch(batch)
-                    sent_count += len(batch)
-                    
+                    sent_count += batch_size
+            
+            if skipped_count > 0:
+                self.logger.warning(f"Skipped {skipped_count} events out of {len(events)} total events")
+            
+            self.logger.info(f"Successfully sent {sent_count} out of {len(events)} events to Event Hub")
             return sent_count
             
         except EventHubError as e:

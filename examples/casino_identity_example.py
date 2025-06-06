@@ -22,8 +22,8 @@ def main():
     """Run casino simulation with identity-based authentication."""
     
     # Configuration - replace with your values
-    eventhub_namespace = "your-namespace.servicebus.windows.net"
-    eventhub_name = "your-eventhub-name"
+    eventhub_namespace = "evhns-zephyr-casino-tst-we.servicebus.windows.net"
+    eventhub_name = "casinosimulation"
     
     # Choose your authentication method
     
