@@ -607,7 +607,7 @@ class EventHubPublisher:
             try:
                 from azure.identity import DefaultAzureCredential
                 self.credential = DefaultAzureCredential()
-                self.logger.info("Using DefaultAzureCredential for authentication")
+                self.logger.debug("Using DefaultAzureCredential for authentication") # Changed from info to debug
             except ImportError:
                 raise ImportError(
                     "Azure Identity package not installed. "
@@ -626,7 +626,7 @@ class EventHubPublisher:
                 conn_str=self.connection_string,
                 eventhub_name=self.eventhub_name
             )
-            self.logger.info("Connected to Event Hub using connection string")
+            self.logger.debug("Connected to Event Hub using connection string") # Changed from info to debug
         else:
             # Identity-based authentication
             self.producer = EventHubProducerClient(
@@ -634,7 +634,7 @@ class EventHubPublisher:
                 eventhub_name=self.eventhub_name,
                 credential=self.credential
             )
-            self.logger.info(f"Connected to Event Hub using identity-based authentication: {self.fully_qualified_namespace}")
+            self.logger.debug(f"Connected to Event Hub using identity-based authentication: {self.fully_qualified_namespace}") # Changed from info to debug
         
         return self
         
@@ -692,63 +692,59 @@ class EventHubPublisher:
                 # Create batch for this partition if it doesn't exist
                 if partition_key not in event_batches:
                     event_batches[partition_key] = self.producer.create_batch(partition_key=partition_key)
-                    batch_event_counts[partition_key] = 0
+                    batch_event_counts[partition_key] = 0 # Initialize count for new batch
                     
                 # Encode the event data
                 try:
                     event_json = json.dumps(event_data)
                     event_data_encoded = EventData(body=event_json.encode('utf-8'))
-                    event_size = len(event_json.encode('utf-8'))
+                    event_size = len(event_json.encode('utf-8')) # Calculate size for logging
                 except (TypeError, ValueError) as e:
                     self.logger.warning(f"Failed to encode event data, skipping: {e}")
                     skipped_count += 1
                     continue
                 
-                # Try to add the event to the current batch
-                added_to_batch = event_batches[partition_key].add(event_data_encoded)
-                
-                if added_to_batch:
-                    # Event was successfully added to the batch
+                try:
+                    # Try to add the event to the current batch for this partition_key
+                    event_batches[partition_key].add(event_data_encoded)
                     batch_event_counts[partition_key] += 1
-                    self.logger.debug(f"Added event to batch for partition {partition_key} (size: {event_size} bytes)")
-                else:
-                    # Current batch is full, send it
-                    batch_size = batch_event_counts[partition_key]
-                    if batch_size > 0:
-                        self.logger.debug(f"Sending full batch for partition {partition_key} ({batch_size} events)")
+                    self.logger.debug(f"Added event to batch for partition {partition_key} (size: {event_size} bytes, current batch count: {batch_event_counts[partition_key]})")
+                except ValueError:
+                    # Current batch is full (or event is too large for it). Send current batch.
+                    current_batch_actual_event_count = batch_event_counts[partition_key]
+                    if current_batch_actual_event_count > 0:
+                        self.logger.debug(f"Sending full batch for partition {partition_key} ({current_batch_actual_event_count} events)")
                         self.producer.send_batch(event_batches[partition_key])
-                        sent_count += batch_size
+                        sent_count += current_batch_actual_event_count
                     
                     # Create a new batch for this partition key
                     event_batches[partition_key] = self.producer.create_batch(partition_key=partition_key)
-                    batch_event_counts[partition_key] = 0
+                    batch_event_counts[partition_key] = 0 # Reset count for the new batch
                     
                     # Try adding the event to the new batch
-                    added_to_new_batch = event_batches[partition_key].add(event_data_encoded)
-                    
-                    if added_to_new_batch:
-                        # Event was successfully added to the new batch
+                    try:
+                        event_batches[partition_key].add(event_data_encoded)
                         batch_event_counts[partition_key] += 1
-                        self.logger.debug(f"Added event to new batch for partition {partition_key} (size: {event_size} bytes)")
-                    else:
-                        # If it still fails on an empty batch, the event is genuinely too large
-                        self.logger.warning(f"Event too large ({event_size} bytes) to fit in empty batch, skipping event for player {event_data.get(partition_key_field, 'unknown')}")
+                        self.logger.debug(f"Added event to new batch for partition {partition_key} (size: {event_size} bytes, current batch count: {batch_event_counts[partition_key]})")
+                    except ValueError:
+                        # If it still fails on a new empty batch, the event is genuinely too large
+                        self.logger.warning(f"Event ({event_size} bytes) is too large for a new empty batch. Skipping event for player {event_data.get(partition_key_field, 'unknown')}.")
                         self.logger.debug(f"Skipped event data: {json.dumps(event_data, indent=2)}")
                         skipped_count += 1
-                        continue
+                        # Continue to the next event, do not add this event to any batch
             
             # Send any remaining batches
             for partition_key, batch in event_batches.items():
-                batch_size = batch_event_counts[partition_key]
-                if batch_size > 0:
-                    self.logger.debug(f"Sending final batch for partition {partition_key} ({batch_size} events)")
+                final_batch_event_count = batch_event_counts[partition_key]
+                if final_batch_event_count > 0: # Check if there are actual events in this batch
+                    self.logger.debug(f"Sending final batch for partition {partition_key} ({final_batch_event_count} events)")
                     self.producer.send_batch(batch)
-                    sent_count += batch_size
+                    sent_count += final_batch_event_count
             
             if skipped_count > 0:
                 self.logger.warning(f"Skipped {skipped_count} events out of {len(events)} total events")
             
-            self.logger.info(f"Successfully sent {sent_count} out of {len(events)} events to Event Hub")
+            self.logger.debug(f"Successfully sent {sent_count} out of {len(events)} events to Event Hub") # Changed from info to debug
             return sent_count
             
         except EventHubError as e:
@@ -982,6 +978,16 @@ class CasinoSimulation:
             self.logger.error("No players defined for the simulation")
             return
         
+        # If publisher is an EventHubPublisher, use it as a context manager
+        if isinstance(self.publisher, EventHubPublisher):
+            with self.publisher:
+                self._run_simulation()
+        else:
+            # For FileEventStore or other publishers, just run directly
+            self._run_simulation()
+    
+    def _run_simulation(self) -> None:
+        """Internal method to run the actual simulation."""
         self.logger.info(f"Starting casino simulation with {len(self.players)} players on {self.thread_count} threads")
         
         # Distribute players across threads

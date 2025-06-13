@@ -24,6 +24,11 @@ def setup_logging(verbose: bool = False) -> None:
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=log_level, format=log_format)
 
+    # Set Azure SDK logger levels to WARNING to suppress INFO logs
+    logging.getLogger("azure.eventhub").setLevel(logging.WARNING)
+    logging.getLogger("azure.identity").setLevel(logging.WARNING)
+    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 
 def parse_args():
     """Parse command-line arguments."""
@@ -148,10 +153,7 @@ def main():
     args = parse_args()
     
     # Set up logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    setup_logging(args.verbose) # Use the setup_logging function
     logger = logging.getLogger("casino_cli")
     
     # Determine the publisher based on arguments
