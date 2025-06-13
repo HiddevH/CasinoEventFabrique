@@ -50,6 +50,7 @@ uv pip install -e .
 The package provides a command-line tool for casino simulation with multiple authentication options:
 
 #### Using Connection String (traditional method)
+
 ```bash
 casinoeventfabrique-casino --connection-string "YOUR_EVENT_HUB_CONNECTION_STRING" \
                           --eventhub-name "YOUR_EVENT_HUB_NAME" \
@@ -57,6 +58,7 @@ casinoeventfabrique-casino --connection-string "YOUR_EVENT_HUB_CONNECTION_STRING
 ```
 
 #### Using Identity-based Authentication (recommended)
+
 ```bash
 # Using Managed Identity (when running on Azure resources)
 casinoeventfabrique-casino --eventhub-namespace "mynamespace.servicebus.windows.net" \
@@ -77,6 +79,7 @@ casinoeventfabrique-casino --eventhub-namespace "mynamespace.servicebus.windows.
 ```
 
 #### Output to File
+
 ```bash
 casinoeventfabrique-casino --output-file events/casino_events.json --duration 300
 ```
